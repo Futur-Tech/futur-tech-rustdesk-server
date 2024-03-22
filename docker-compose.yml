@@ -1,0 +1,20 @@
+services:
+  rustdesk-server:
+    container_name: rustdesk-server
+    ports:
+      - 21115:21115       # Server (NAT type test)
+      - 21116:21116       # Server (TCP hole punching and connection service)
+      - 21116:21116/udp   # Server (ID registration and heartbeat service)
+      - 21117:21117       # Relay services
+    image: rustdesk/rustdesk-server-s6:latest
+    environment:
+      - RELAY
+      - LIMIT_SPEED
+      - TOTAL_BANDWIDTH
+      - SINGLE_BANDWIDTH
+      - ALWAYS_USE_RELAY
+      - "ENCRYPTED_ONLY=1"
+      - "RUST_LOG=info" # Set debug level (error|warn|info|debug|trace)
+    volumes:
+      - /srv/rustdesk/docker-data/data:/data
+    restart: unless-stopped

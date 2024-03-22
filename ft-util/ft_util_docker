@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+
+function docker-compose_filter-output() {
+    grep -v % | grep -v "Pulling fs layer" | grep -v "Waiting" | grep -v "Downloading" | grep -v "Extracting"
+}
+export -f docker-compose_filter-output
+
+# Generate arguments for docker compose command
+# docker-compose_arg "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
+function docker-compose_arg() {
+    for i in $(echo ${1} | tr "," "\n"); do arg_str+=" --file ${i}"; done
+    [ -n "${2}" ] && for i in $(echo ${2} | tr "," "\n"); do arg_str+=" --env-file ${i}"; done
+    [ -n "${3}" ] && for i in $(echo ${3} | tr "," "\n"); do arg_str+=" --profile ${i}"; done
+    echo "${arg_str}"
+}
+export -f docker-compose_arg
+
+# docker-compose_configcheck "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
+function docker-compose_configcheck() {
+    local docker_cmd="docker compose $(docker-compose_arg ${1} ${2} ${3}) config --quiet"
+    $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
+    $docker_cmd 2>&1 | $S_LOG -s warn -d "$S_NAME|$1" -i
+    local exit_code=${PIPESTATUS[0]}
+    $S_LOG -s ${exit_code} -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=${exit_code}"
+    [ $exit_code -ne 0 ] && exit $exit_code
+}
+export -f docker-compose_configcheck
+
+# Pull new images if exist
+# docker-compose_pull "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
+function docker-compose_pull() {
+    local docker_cmd="docker compose $(docker-compose_arg ${1} ${2} ${3}) pull"
+    $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
+    $docker_cmd
+    $S_LOG -s $? -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=$?"
+}
+export -f docker-compose_pull
+
+# If images or configuration changed, container(s) will be recreated
+# docker-compose_up "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
+function docker-compose_up() {
+    local docker_cmd="docker compose $(docker-compose_arg ${1} ${2} ${3}) up --detach --always-recreate-deps"
+    $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
+    $docker_cmd
+    local exit_code=$?
+    $S_LOG -s ${exit_code} -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=${exit_code}"
+    [ $exit_code -ne 0 ] && exit $exit_code
+}
+export -f docker-compose_up
+
+# docker-compose_down "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
+function docker-compose_down() {
+    local docker_cmd="docker compose $(docker-compose_arg ${1} ${2} ${3}) down"
+    $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
+    $docker_cmd
+    $S_LOG -s $? -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=$?"
+}
+export -f docker-compose_down
+
+# docker_container_wait_healthy container_name
+function docker_container_wait_healthy() {
+    if [ "$(docker inspect -f {{.State.Health.Status}} $1)" != "healthy" ]; then
+        $S_LOG -d "$S_NAME" "Waiting for container $1 is started and healthy"
+        while [ "$(docker inspect -f {{.State.Health.Status}} $1)" != "healthy" ]; do
+            printf "."
+            sleep 5
+        done
+        echo
+    fi
+}
+export -f docker_container_wait_healthy
+
+# verify_docker_local_volumes "my_project" "/srv/project/docker-data"
+verify_docker_local_volumes() {
+    local project_name=$1
+    local project_path=$2
+
+    # run the docker volume inspect command with filters and format
+    local inspect_output=$(docker volume ls -q --filter name=${project_name}_* | xargs docker volume inspect --format '{{json .Options}} {{.Name}}')
+
+    # check if output is empty or null
+    if [ -z "$inspect_output" ]; then
+        $S_LOG -s err -d "$S_NAME" "Error: No volumes found for project ${project_name}."
+        return 1
+    fi
+
+    # check if any options are null and throw error if found
+    local null_option=$(echo "$inspect_output" | grep "null" | awk '{print $2}')
+    if [ -n "$null_option" ]; then
+        $S_LOG -s err -d "$S_NAME" "Options null for volume $null_option"
+        $S_LOG -s err -d "$S_NAME" "This means that the local volume have NOT been binded to $project_path"
+        return 1
+    fi
+}
+export -f verify_docker_local_volumes
+
+# Simple override of variable in files (Docker environement variable definitions)
+# override_var "path_file" "VAR=" "123"
+function override_var() {
+    if grep "${2}" ${1} &>/dev/null; then
+        sed -i "s|^${2}.*|${2}${3} # ${S_NAME}|g" ${1}
+    else
+        $S_LOG -s err -d "$S_NAME" -d "${1}" "Not found \"${2}\" in configuration file"
+    fi
+}
+export -f override_var
+
+# Will generate key if empty
+# Key should only be alphanumeric and without quotes
+# override_key "path_file" "VAR="
+function override_key() {
+    key=$(sed -nr "s|${2}([[:alnum:]]+).*|\1|p" ${1})
+    if [ -z "${key}" ]; then
+        key=$(openssl rand -hex 32)
+        $S_LOG -s warn -d "$S_NAME" -d "${1}" "[New key generated] ${2}${key}"
+    fi
+    override_var "${1}" "${2}" "${key}"
+}
+export -f override_key
