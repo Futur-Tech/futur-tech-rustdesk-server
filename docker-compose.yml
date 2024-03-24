@@ -18,3 +18,4 @@ services:
     volumes:
       - /srv/rustdesk/docker-data/data:/data
     restart: unless-stopped
+    
