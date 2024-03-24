@@ -25,8 +25,8 @@ source "$dc_env" # Load environment variables from the file
 
 # Set RELAY to FQDN if empty
 if [ -z "$RELAY" ]; then
-    $S_LOG -s warn -d $S_NAME "Setting RustDesk relay address to [$(hostname -f):21117]"
-    override_var "${dc_env}" "RELAY=" "$(hostname -f):21117"
+    $S_LOG -s warn -d $S_NAME "Setting RustDesk relay address to [$(hostname -f)]"
+    override_var "${dc_env}" "RELAY=" "$(hostname -f)"
     source "$dc_env"
 fi
 
