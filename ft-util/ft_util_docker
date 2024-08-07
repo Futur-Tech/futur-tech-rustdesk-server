@@ -26,6 +26,55 @@ function docker-compose_configcheck() {
 }
 export -f docker-compose_configcheck
 
+# Remove old images which repo are used in docker compose config
+# docker-compose_prune_img "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
+# Modified script from https://stackoverflow.com/a/37133531
+function docker-compose_prune_img() {
+    local img_conf=($(docker compose $(docker-compose_arg ${1} ${2} ${3}) config | awk '/image:/ {print $2}'))                     # Get images list from docker compose conf
+    local img_used=($(docker ps -a --format '{{.Image}}' | sort -u | uniq | awk -F ':' '$2{print $1":"$2}!$2{print $1":latest"}')) # Get all the images currently in use
+    local img_all=($(docker images --format '{{.Repository}}:{{.Tag}}' | sort -u))                                                 # Get all the images currently available
+    local imgs_to_remove=()                                                                                                        # Array to collect images to be removed
+
+    # Remove the unused images that are not part of img_conf and not currently in use
+    for img in "${img_all[@]}"; do
+        # Check if the image is in use
+        local img_in_use=false
+        for used in "${img_used[@]}"; do
+            if [[ "$img" == "$used" ]]; then
+                img_in_use=true
+                break
+            fi
+        done
+
+        # Check if the image repository is part of the config images (ignoring tag)
+        local repo_in_conf=false
+        local img_repo=$(echo "$img" | awk -F: '{print $1}')
+        for conf in "${img_conf[@]}"; do
+            local conf_repo=$(echo "$conf" | awk -F: '{print $1}')
+            if [[ "$img_repo" == "$conf_repo" ]]; then
+                repo_in_conf=true
+                break
+            fi
+        done
+
+        # Remove the image if repo is in conf and specific image not in use
+        [[ "$repo_in_conf" == true && "$img_in_use" == false ]] && imgs_to_remove+=("$img")
+    done
+
+    # Remove all collected images in one command
+    if [ ${#imgs_to_remove[@]} -gt 0 ]; then
+        local docker_cmd="docker image rm ${imgs_to_remove[*]}"
+        $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
+        $docker_cmd
+        local exit_code=$?
+        $S_LOG -s ${exit_code} -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=${exit_code}"
+        [ $exit_code -ne 0 ] && exit $exit_code
+    else
+        $S_LOG -d "$S_NAME" "No unused images to remove."
+    fi
+}
+export -f docker-compose_configcheck
+
 # Pull new images if exist
 # docker-compose_pull "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
 function docker-compose_pull() {
