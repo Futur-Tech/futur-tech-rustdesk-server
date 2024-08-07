@@ -73,7 +73,7 @@ function docker-compose_prune_img() {
         $S_LOG -d "$S_NAME" "No unused images to remove."
     fi
 }
-export -f docker-compose_configcheck
+export -f docker-compose_prune_img
 
 # Pull new images if exist
 # docker-compose_pull "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
