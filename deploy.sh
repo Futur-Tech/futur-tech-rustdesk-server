@@ -35,6 +35,7 @@ docker-compose_configcheck "${dc_file}" "${dc_env}"
 docker-compose_pull "${dc_file}" "${dc_env}"
 docker-compose_up "${dc_file}" "${dc_env}"
 docker_container_wait_healthy rustdesk-server
+docker-compose_prune_img "${dc_file}" "${dc_env}" # Pruning old image
 
 # Show server data for connecting clients
 $S_LOG -s warn -d $S_NAME "config={\"host\": \"${RELAY}\", \"key\": \"$(cat ${rustdesk_fld}/docker-data/data/id_ed25519.pub)\"}"
