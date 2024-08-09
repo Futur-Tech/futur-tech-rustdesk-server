@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+# Simple function to run and log docker commands
+function run_docker_cmd() {
+    local cmd="$1"
+    $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$cmd"
+    $cmd
+    local exit_code=$?
+    $S_LOG -s ${exit_code} -d "$S_NAME" "[${cmd}] returned EXIT_CODE=${exit_code}"
+    return $exit_code
+}
+export -f run_docker_cmd
+
 function docker-compose_filter-output() {
     grep -v % | grep -v "Pulling fs layer" | grep -v "Waiting" | grep -v "Downloading" | grep -v "Extracting"
 }
@@ -30,45 +41,45 @@ export -f docker-compose_configcheck
 # docker-compose_prune_img "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
 # Modified script from https://stackoverflow.com/a/37133531
 function docker-compose_prune_img() {
-    local img_conf=($(docker compose $(docker-compose_arg ${1} ${2} ${3}) config | awk '/image:/ {print $2}'))                     # Get images list from docker compose conf
-    local img_used=($(docker ps -a --format '{{.Image}}' | sort -u | uniq | awk -F ':' '$2{print $1":"$2}!$2{print $1":latest"}')) # Get all the images currently in use
-    local img_all=($(docker images --format '{{.Repository}}:{{.Tag}}' | sort -u))                                                 # Get all the images currently available
-    local imgs_to_remove=()                                                                                                        # Array to collect images to be removed
 
-    # Remove the unused images that are not part of img_conf and not currently in use
-    for img in "${img_all[@]}"; do
+    local imgs_conf=($(docker compose $(docker-compose_arg ${1} ${2} ${3}) config --images)) # Get images list from docker compose conf
+    local imgs_used=($(docker ps --all --format '{{.Image}}' | uniq))                        # Get all the images currently in use
+    local imgs_all=($(docker images --format '{{.Repository}}:{{.Tag}}:{{.ID}}'))            # Get all the images currently available
+    local imgs_to_remove=()                                                                  # Array to collect images to be removed
+
+    # Remove the unused images that are not part of imgs_conf and not currently in use
+    for img in "${imgs_all[@]}"; do
+        local img_repo=$(echo "$img" | awk -F: '{print $1}')
+        local img_name=$(echo "$img_repo" | awk -F/ '{print $(NF)}')
+        local img_tag=$(echo "$img" | awk -F: '{print $2}')
+        local img_id_trunc=$(echo "$img" | awk -F: '{print $3}')
+
         # Check if the image is in use
         local img_in_use=false
-        for used in "${img_used[@]}"; do
-            if [[ "$img" == "$used" ]]; then
+        for used in "${imgs_used[@]}"; do
+            if [[ "${img_repo}:${img_tag}" == "$used" ]] || [[ "${img_id_trunc}" == "$used" ]]; then
                 img_in_use=true
                 break
             fi
         done
 
         # Check if the image repository is part of the config images (ignoring tag)
-        local repo_in_conf=false
-        local img_repo=$(echo "$img" | awk -F: '{print $1}')
-        for conf in "${img_conf[@]}"; do
-            local conf_repo=$(echo "$conf" | awk -F: '{print $1}')
-            if [[ "$img_repo" == "$conf_repo" ]]; then
-                repo_in_conf=true
+        local img_in_conf=false
+        for conf in "${imgs_conf[@]}"; do
+            local conf_img_name=$(echo "$conf" | awk -F: '{print $1}' | awk -F/ '{print $(NF)}')
+            if [[ "$img_name" == "$conf_img_name" ]]; then
+                img_in_conf=true
                 break
             fi
         done
 
         # Remove the image if repo is in conf and specific image not in use
-        [[ "$repo_in_conf" == true && "$img_in_use" == false ]] && imgs_to_remove+=("$img")
+        [[ "$img_in_conf" == true && "$img_in_use" == false ]] && imgs_to_remove+=("$img_id_trunc")
     done
 
     # Remove all collected images in one command
     if [ ${#imgs_to_remove[@]} -gt 0 ]; then
-        local docker_cmd="docker image rm ${imgs_to_remove[*]}"
-        $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
-        $docker_cmd
-        local exit_code=$?
-        $S_LOG -s ${exit_code} -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=${exit_code}"
-        [ $exit_code -ne 0 ] && exit $exit_code
+        run_docker_cmd "docker image rm ${imgs_to_remove[*]}" || exit
     else
         $S_LOG -d "$S_NAME" "No unused images to remove."
     fi
@@ -78,31 +89,21 @@ export -f docker-compose_prune_img
 # Pull new images if exist
 # docker-compose_pull "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
 function docker-compose_pull() {
-    local docker_cmd="docker compose $(docker-compose_arg ${1} ${2} ${3}) pull"
-    $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
-    $docker_cmd
-    $S_LOG -s $? -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=$?"
+    run_docker_cmd "docker compose $(docker-compose_arg ${1} ${2} ${3}) pull"
 }
 export -f docker-compose_pull
 
 # If images or configuration changed, container(s) will be recreated
 # docker-compose_up "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
 function docker-compose_up() {
-    local docker_cmd="docker compose $(docker-compose_arg ${1} ${2} ${3}) up --detach --always-recreate-deps"
-    $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
-    $docker_cmd
-    local exit_code=$?
-    $S_LOG -s ${exit_code} -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=${exit_code}"
-    [ $exit_code -ne 0 ] && exit $exit_code
+    run_docker_cmd "docker compose $(docker-compose_arg ${1} ${2} ${3}) up --detach --always-recreate-deps" || exit
 }
 export -f docker-compose_up
 
 # docker-compose_down "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
 function docker-compose_down() {
-    local docker_cmd="docker compose $(docker-compose_arg ${1} ${2} ${3}) down"
-    $S_LOG -s debug -d "$S_NAME" -d "docker_cmd" "$docker_cmd"
-    $docker_cmd
-    $S_LOG -s $? -d "$S_NAME" "[${docker_cmd}] returned EXIT_CODE=$?"
+    run_docker_cmd "docker compose $(docker-compose_arg ${1} ${2} ${3}) down"
+
 }
 export -f docker-compose_down
 
