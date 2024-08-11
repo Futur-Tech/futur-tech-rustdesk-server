@@ -11,11 +11,6 @@ function run_docker_cmd() {
 }
 export -f run_docker_cmd
 
-function docker-compose_filter-output() {
-    grep -v % | grep -v "Pulling fs layer" | grep -v "Waiting" | grep -v "Downloading" | grep -v "Extracting"
-}
-export -f docker-compose_filter-output
-
 # Generate arguments for docker compose command
 # docker-compose_arg "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
 function docker-compose_arg() {
@@ -89,14 +84,14 @@ export -f docker-compose_prune_img
 # Pull new images if exist
 # docker-compose_pull "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
 function docker-compose_pull() {
-    run_docker_cmd "docker compose $(docker-compose_arg ${1} ${2} ${3}) pull"
+    run_docker_cmd "docker compose $(docker-compose_arg ${1} ${2} ${3}) pull --quiet"
 }
 export -f docker-compose_pull
 
 # If images or configuration changed, container(s) will be recreated
 # docker-compose_up "/path/docker-compose.yml" ["/path/docker-compose.env"] ["profile1,profile2"]
 function docker-compose_up() {
-    run_docker_cmd "docker compose $(docker-compose_arg ${1} ${2} ${3}) up --detach --always-recreate-deps" || exit
+    run_docker_cmd "docker compose $(docker-compose_arg ${1} ${2} ${3}) up --detach --always-recreate-deps --quiet-pull" || exit
 }
 export -f docker-compose_up
 
